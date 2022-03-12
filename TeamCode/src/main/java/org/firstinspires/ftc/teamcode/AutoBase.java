@@ -6,20 +6,19 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DigitalChannel;
 import com.qualcomm.robotcore.hardware.Servo;
 
-import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
 import org.firstinspires.ftc.robotcore.external.navigation.Orientation;
 import org.firstinspires.ftc.teamcode.Commands.Command;
-import org.firstinspires.ftc.teamcode.visionpipelines.DuckDetectionPipeline;
+import org.firstinspires.ftc.teamcode.Subsystems.*;
 import org.firstinspires.ftc.teamcode.visionpipelines.TestPipeline;
 import org.opencv.core.Rect;
-import org.openftc.easyopencv.OpenCvCamera;
-import org.openftc.easyopencv.OpenCvCameraFactory;
-import org.openftc.easyopencv.OpenCvCameraRotation;
 import org.openftc.easyopencv.OpenCvWebcam;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import LedDisplayI2cDriver.HT16K33;
 
@@ -33,7 +32,10 @@ import static org.firstinspires.ftc.teamcode.Constants.*;
 
 public abstract class AutoBase extends OpMode {
 
-    protected static AllianceColor allianceColor;
+    Drive drive;
+    Map<Class<? extends Subsystem>,Subsystem> subsystems;
+
+    public static AllianceColor allianceColor;
     private Rect largestRectangle;
 
     private ArrayList<Command> currentCommands;
@@ -95,41 +97,16 @@ public abstract class AutoBase extends OpMode {
         currentCommands.remove(0);
         commandFirstLoop = true;
 
-        leftFront = hardwareMap.get(DcMotor.class, "leftFront");
-        leftFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        leftFront.setTargetPosition(0);
-        leftFront.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        leftBack = hardwareMap.get(DcMotor.class, "leftBack");
-        leftBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        leftBack.setTargetPosition(0);
-        leftBack.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        rightFront = hardwareMap.get(DcMotor.class, "rightFront");
-        rightFront.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        rightFront.setTargetPosition(0);
-        rightFront.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        rightBack = hardwareMap.get(DcMotor.class, "rightBack");
-        rightBack.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        rightBack.setTargetPosition(0);
-        rightBack.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-
-        armRotator = hardwareMap.get(DcMotor.class, "armRotator");
-        armRotator.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        armRotator.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        armRotator.setTargetPosition(0);
-        armRotator.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        armRotator.setPower(1);
-        armExtender = hardwareMap.get(DcMotor.class, "armExtender");
-        armExtender.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        armExtender.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        armExtender.setTargetPosition(0);
-        armExtender.setMode(DcMotor.RunMode.RUN_TO_POSITION);
-        armExtender.setPower(1);
-
-        duckWheel = hardwareMap.get(Servo.class, "duckWheel");
-        bristleServo = hardwareMap.get(Servo.class, "bristleServo");
-
-        digitalTouch = hardwareMap.get(DigitalChannel.class, "digitalTouch");
-        digitalTouch.setMode(DigitalChannel.Mode.INPUT);
+        subsystems = new HashMap<>();
+        subsystems.put(Drive.class, new Drive(hardwareMap, telemetry));
+        subsystems.put(Camera.class, new Camera(hardwareMap, telemetry));
+        subsystems.put(ArmRotator.class, new ArmRotator(hardwareMap, telemetry));
+        subsystems.put(ArmExtender.class, new ArmExtender(hardwareMap, telemetry));
+        subsystems.put(DuckWheel.class, new DuckWheel(hardwareMap, telemetry));
+        subsystems.put(Collection.class, new Collection(hardwareMap, telemetry));
+        subsystems.put(LEDMatrixBack.class, new LEDMatrixBack(hardwareMap, telemetry));
+        subsystems.put(LEDMatrixTop.class, new LEDMatrixTop(hardwareMap, telemetry));
+        subsystems = Collections.unmodifiableMap(subsystems);
 
         mainDiagonalPercent = 0;
         antiDiagonalPercent = 0;
@@ -144,36 +121,11 @@ public abstract class AutoBase extends OpMode {
         rightFrontPower = 0;
         rightBackPower = 0;
 
-        BNO055IMU.Parameters imuParameters = new BNO055IMU.Parameters();
-        imuParameters.mode = BNO055IMU.SensorMode.IMU;
-        imuParameters.angleUnit = BNO055IMU.AngleUnit.DEGREES;
-        imuParameters.accelUnit = BNO055IMU.AccelUnit.METERS_PERSEC_PERSEC;
-        imuParameters.loggingEnabled = false;
-        imu = hardwareMap.get(BNO055IMU.class, "imu");
-        imu.initialize(imuParameters);
         angles = null;
 
         currentRobotAngle = 0.0;
         targetAngle = 0.0;
         angleError = 0.0;
-
-        int cameraMonitorViewId = hardwareMap.appContext.getResources().getIdentifier("cameraMonitorViewId", "id", hardwareMap.appContext.getPackageName());
-        webcam = OpenCvCameraFactory.getInstance().createWebcam(hardwareMap.get(WebcamName.class, "Webcam 1"), cameraMonitorViewId);
-
-        webcam.setPipeline(new TestPipeline());
-        webcam.setMillisecondsPermissionTimeout(2500);
-        webcam.openCameraDeviceAsync(new OpenCvCamera.AsyncCameraOpenListener() {
-            @Override
-            public void onOpened() {
-                webcam.startStreaming(RESOLUTION_WIDTH, RESOLUTION_HEIGHT, OpenCvCameraRotation.SIDEWAYS_RIGHT);
-                telemetry.addData("Webcam", "Setup Finished");
-            }
-           
-            public void onError(int errorCode) {
-                telemetry.speak("The web cam wasn't initialised correctly! Error code: " + errorCode);
-                telemetry.addData("Webcam", "Setup Failed! Error code: " + errorCode);
-            }
-        });
 
         newCommand = false;
         barcodePos = null;
@@ -181,8 +133,6 @@ public abstract class AutoBase extends OpMode {
         
         bristlesOut = false;
 
-        display = hardwareMap.get(HT16K33.class, "display8x8");
-        display.displayOn();
     }
 
     public void start() {
@@ -382,7 +332,7 @@ public abstract class AutoBase extends OpMode {
             targetAngle = currentCommand.angle * allianceColor.direction;
             getAngleError();
         }
-        if(Math.abs(angleError) < ANGLE_ERROR_TOLERANCE) nextCommand();
+        if(Math.abs(angleError) < HEADING_ERROR_TOLERANCE) nextCommand();
     }
 
     /**
